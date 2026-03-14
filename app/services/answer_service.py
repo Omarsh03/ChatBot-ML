@@ -1,9 +1,23 @@
 import logging
+import re
 
 from app.core.config import Settings
 from app.domain.models import ChatAnswer, Citation, DocumentChunk
 
 logger = logging.getLogger(__name__)
+
+_HE_WORD_PATTERN = re.compile(r"[\u0590-\u05FF]+")
+_EN_WORD_PATTERN = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+_LANG_OVERRIDE_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("en", re.compile(r"\bin english\b", re.IGNORECASE)),
+    ("en", re.compile(r"\b(answer|reply|respond|write|explain)\s+(in\s+)?english\b", re.IGNORECASE)),
+    ("en", re.compile(r"תענ[הי]\s+באנגלית")),
+    ("en", re.compile(r"ת(?:ן|ני)\s+לי\s+תשובה\s+באנגלית")),
+    ("he", re.compile(r"\bin hebrew\b", re.IGNORECASE)),
+    ("he", re.compile(r"\b(answer|reply|respond|write|explain)\s+(in\s+)?hebrew\b", re.IGNORECASE)),
+    ("he", re.compile(r"תענ[הי]\s+בעברית")),
+    ("he", re.compile(r"ת(?:ן|ני)\s+לי\s+תשובה\s+בעברית")),
+]
 
 
 def _build_citations(hits: list[tuple[DocumentChunk, float]], max_items: int = 3) -> list[Citation]:
@@ -23,12 +37,42 @@ def _build_citations(hits: list[tuple[DocumentChunk, float]], max_items: int = 3
     return citations
 
 
-def _compose_extractive_answer(question: str, hits: list[tuple[DocumentChunk, float]]) -> str:
+def _explicit_language_override(question: str) -> str | None:
+    selected: tuple[str, int] | None = None
+    for lang, pattern in _LANG_OVERRIDE_RULES:
+        for match in pattern.finditer(question):
+            if selected is None or match.start() > selected[1]:
+                selected = (lang, match.start())
+    return selected[0] if selected else None
+
+
+def _dominant_language(question: str) -> str:
+    he_words = len(_HE_WORD_PATTERN.findall(question))
+    en_words = len(_EN_WORD_PATTERN.findall(question))
+    if en_words > he_words:
+        return "en"
+    return "he"
+
+
+def _determine_response_language(question: str) -> str:
+    return _explicit_language_override(question) or _dominant_language(question)
+
+
+def _compose_extractive_answer(
+    question: str,
+    hits: list[tuple[DocumentChunk, float]],
+    response_language: str,
+) -> str:
     top_chunk = hits[0][0] if hits else None
     top_chunk_text = top_chunk.text if top_chunk else ""
     if len(top_chunk_text) > 360:
         top_chunk_text = top_chunk_text[:360].rstrip() + "..."
     lecture_title = top_chunk.metadata.lecture_title if top_chunk else "unknown lecture"
+    if response_language == "he":
+        return (
+            f"בהתבסס על תמלולי הקורס, זו התשובה הנתמכת ביותר לשאלה שלך "
+            f"('{question}') מתוך ההרצאה '{lecture_title}':\n\n{top_chunk_text}"
+        )
     return (
         f"Based on the course transcripts, here is the best supported answer to your question "
         f"('{question}') from lecture '{lecture_title}':\n\n{top_chunk_text}"
@@ -49,6 +93,7 @@ def _compose_generative_answer(
     question: str,
     hits: list[tuple[DocumentChunk, float]],
     settings: Settings,
+    response_language: str,
 ) -> str | None:
     if not settings.use_llm_grounded_answers:
         return None
@@ -76,7 +121,7 @@ def _compose_generative_answer(
     user_prompt = (
         f"Question:\n{question}\n\n"
         f"Transcript evidence:\n{context}\n\n"
-        "Write a grounded answer in the same language as the question."
+        f"Write a grounded answer in {'Hebrew' if response_language == 'he' else 'English'}."
     )
 
     try:
@@ -110,7 +155,13 @@ def generate_grounded_answer(
         )
 
     citations = _build_citations(hits, max_items=5)
-    answer = _compose_generative_answer(question=question, hits=hits, settings=settings)
+    response_language = _determine_response_language(question)
+    answer = _compose_generative_answer(
+        question=question,
+        hits=hits,
+        settings=settings,
+        response_language=response_language,
+    )
     if not answer:
-        answer = _compose_extractive_answer(question, hits)
+        answer = _compose_extractive_answer(question, hits, response_language=response_language)
     return ChatAnswer(answer=answer, citations=citations, grounded=True)
