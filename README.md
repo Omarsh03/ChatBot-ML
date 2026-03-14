@@ -31,6 +31,9 @@ This MVP now supports end-to-end local demo flow.
 
 ## Exact run steps (Windows PowerShell)
 
+For best retrieval quality, configure your own provider API key in `.env` (for example `OPENAI_API_KEY`).
+Without a provider API key, the app can still run using local-hash fallback retrieval with lower answer quality.
+
 1. Create and activate a virtual environment (Python 3.13 example):
    - `py -3.13 -m venv .venv`
    - `.venv\Scripts\Activate.ps1`
