@@ -1,0 +1,13 @@
+.env
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.cursor/
+data/indexes/
+data/media/
+data/transcripts/
+data/metadata/
+course_rag_chatbot.egg-info/
