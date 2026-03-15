@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Callable
 
 from app.core.config import Settings
 from app.pipelines.ingest_and_index import run_ingest_and_index
@@ -35,6 +36,7 @@ def run_transcribe_and_ingest(
     course_id: str | None = None,
     transcription_engine: TranscriptionEngine | None = None,
     run_ingestion: bool = True,
+    progress_callback: Callable[[int, int, LectureMediaItem, bool], None] | None = None,
 ) -> dict[str, int]:
     selected_course_id = course_id or settings.default_course_id
     if transcription_engine is None:
@@ -53,10 +55,15 @@ def run_transcribe_and_ingest(
         return {"media_files": 0, "transcribed": 0, "indexed": 0}
 
     lecture_records: list[dict] = []
+    processed_count = 0
     transcribed_count = 0
     for item in items:
         transcript_text, runtime = engine.transcribe(item.media_path)
+        processed_count += 1
+        item_success = bool(transcript_text.strip())
         if not transcript_text.strip():
+            if progress_callback:
+                progress_callback(processed_count, len(items), item, False)
             continue
         transcript_filename = _build_transcript_filename(item)
         transcript_path = transcripts_dir / transcript_filename
@@ -71,6 +78,8 @@ def run_transcribe_and_ingest(
                 "runtime": runtime,
             }
         )
+        if progress_callback:
+            progress_callback(processed_count, len(items), item, item_success)
 
     lectures_metadata_path = metadata_dir / settings.transcription_lectures_metadata_name
     _write_lecture_metadata(lectures_metadata_path, lecture_records)
