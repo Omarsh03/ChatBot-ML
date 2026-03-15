@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     min_retrieval_score: float = Field(default=0.30, alias="MIN_RETRIEVAL_SCORE")
     min_evidence_hits: int = Field(default=1, alias="MIN_EVIDENCE_HITS")
     min_lexical_overlap: float = Field(default=0.12, alias="MIN_LEXICAL_OVERLAP")
+    probability_retrieval_pool_k: int = Field(default=48, alias="PROBABILITY_RETRIEVAL_POOL_K")
+    probability_min_retrieval_score: float = Field(default=0.22, alias="PROBABILITY_MIN_RETRIEVAL_SCORE")
+    probability_min_lexical_overlap: float = Field(default=0.08, alias="PROBABILITY_MIN_LEXICAL_OVERLAP")
+    probability_min_evidence_hits: int = Field(default=1, alias="PROBABILITY_MIN_EVIDENCE_HITS")
     insufficient_evidence_message: str = Field(
         default="I do not have enough evidence from the course transcripts to answer this confidently.",
         alias="INSUFFICIENT_EVIDENCE_MESSAGE",

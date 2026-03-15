@@ -64,35 +64,63 @@ def _title_overlap(query: str, chunk: DocumentChunk) -> float:
     return len(q_tokens.intersection(title_tokens)) / len(q_tokens)
 
 
+def _course_retrieval_params(
+    selected_course_id: str,
+    settings: Settings,
+) -> tuple[int, float, float, int]:
+    if selected_course_id.strip().lower() == "probability":
+        return (
+            settings.probability_retrieval_pool_k,
+            settings.probability_min_retrieval_score,
+            settings.probability_min_lexical_overlap,
+            settings.probability_min_evidence_hits,
+        )
+    return (
+        settings.retrieval_pool_k,
+        settings.min_retrieval_score,
+        settings.min_lexical_overlap,
+        settings.min_evidence_hits,
+    )
+
+
 def retrieve_chunks(
     question: str,
     settings: Settings,
     course_id: str | None = None,
 ) -> list[tuple[DocumentChunk, float]]:
     selected_course_id = course_id or settings.default_course_id
+    retrieval_pool_k, min_retrieval_score, min_lexical_overlap, min_evidence_hits = _course_retrieval_params(
+        selected_course_id=selected_course_id,
+        settings=settings,
+    )
 
     embedding_provider = build_embedding_provider(settings)
     vector_store = FaissVectorStore(settings.index_dir, selected_course_id)
 
     query_vector = embedding_provider.embed_query(question)
-    hits = vector_store.search(query_vector, top_k=settings.retrieval_pool_k)
+    hits = vector_store.search(query_vector, top_k=retrieval_pool_k)
 
     # Keep only evidence that clears both vector relevance and lexical grounding checks.
     filtered_hits: list[tuple[DocumentChunk, float]] = []
     for chunk, score in hits:
-        if score < settings.min_retrieval_score:
+        if score < min_retrieval_score:
             continue
-        if _lexical_overlap(question, chunk) < settings.min_lexical_overlap:
+        if _lexical_overlap(question, chunk) < min_lexical_overlap:
             continue
         boosted_score = score + (0.08 * _title_overlap(question, chunk))
         filtered_hits.append((chunk, boosted_score))
 
     filtered_hits.sort(key=lambda pair: pair[1], reverse=True)
 
-    reranked_hits = _rerank_hits(question=question, hits=filtered_hits, settings=settings)
+    reranked_hits = _rerank_hits(
+        question=question,
+        hits=filtered_hits,
+        settings=settings,
+        retrieval_pool_k=retrieval_pool_k,
+    )
     final_hits = reranked_hits[: settings.top_k]
 
-    if len(final_hits) < settings.min_evidence_hits:
+    if len(final_hits) < min_evidence_hits:
         return []
     return final_hits
 
@@ -101,6 +129,7 @@ def _rerank_hits(
     question: str,
     hits: list[tuple[DocumentChunk, float]],
     settings: Settings,
+    retrieval_pool_k: int,
 ) -> list[tuple[DocumentChunk, float]]:
     provider = settings.rerank_provider.strip().lower()
     if provider in {"none", ""} or not hits:
@@ -122,7 +151,7 @@ def _rerank_hits(
             model=settings.cohere_rerank_model,
             query=question,
             documents=documents,
-            top_n=min(settings.retrieval_pool_k, len(documents)),
+            top_n=min(retrieval_pool_k, len(documents)),
         )
         reranked: list[tuple[DocumentChunk, float]] = []
         for row in response.results:
