@@ -8,6 +8,23 @@ logger = logging.getLogger(__name__)
 
 _HE_WORD_PATTERN = re.compile(r"[\u0590-\u05FF]+")
 _EN_WORD_PATTERN = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+_GREETING_PATTERNS_HE = [
+    re.compile(r"^\s*ה(?:י|יי)\s*[!.?]*\s*$"),
+    re.compile(r"^\s*שלום(?:\s+לך|\s+לכם)?\s*[!.?]*\s*$"),
+    re.compile(r"מה\s+קורה"),
+    re.compile(r"מה\s+הולך"),
+    re.compile(r"איך\s+אתה\s+היום"),
+    re.compile(r"איך\s+את\s+היום"),
+    re.compile(r"מה\s+שלומך"),
+]
+_GREETING_PATTERNS_EN = [
+    re.compile(r"^\s*hi+\s*[!.?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*hello+\s*[!.?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*hey+\s*[!.?]*\s*$", re.IGNORECASE),
+    re.compile(r"\bhow are you(?: today)?\b", re.IGNORECASE),
+    re.compile(r"\bwhat'?s up\b", re.IGNORECASE),
+    re.compile(r"\bhow'?s it going\b", re.IGNORECASE),
+]
 _LANG_OVERRIDE_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("en", re.compile(r"\bin english\b", re.IGNORECASE)),
     ("en", re.compile(r"\b(answer|reply|respond|write|explain)\s+(in\s+)?english\b", re.IGNORECASE)),
@@ -56,6 +73,19 @@ def _dominant_language(question: str) -> str:
 
 def _determine_response_language(question: str) -> str:
     return _explicit_language_override(question) or _dominant_language(question)
+
+
+def _is_greeting_or_smalltalk(question: str) -> bool:
+    normalized = question.strip().lower()
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _GREETING_PATTERNS_HE + _GREETING_PATTERNS_EN)
+
+
+def _smalltalk_response(language: str) -> str:
+    if language == "he":
+        return "היי! אני כאן כדי לעזור לך בשאלות על חומר הלימוד. אפשר לשאול כל שאלה."
+    return "Hi! I am here to help with course-related questions. Feel free to ask anything."
 
 
 def _compose_extractive_answer(
@@ -116,7 +146,8 @@ def _compose_generative_answer(
         "Answer using only the transcript evidence provided.\n"
         "If evidence is weak or ambiguous, say so briefly.\n"
         "Prefer concise, direct answers.\n"
-        "Do not invent facts outside the evidence."
+        "Do not invent facts outside the evidence.\n"
+        "When writing math, format equations in LaTeX markdown using $...$ for inline and $$...$$ for blocks."
     )
     user_prompt = (
         f"Question:\n{question}\n\n"
@@ -147,6 +178,15 @@ def generate_grounded_answer(
     hits: list[tuple[DocumentChunk, float]],
     settings: Settings,
 ) -> ChatAnswer:
+    response_language = _determine_response_language(question)
+
+    if _is_greeting_or_smalltalk(question):
+        return ChatAnswer(
+            answer=_smalltalk_response(response_language),
+            citations=[],
+            grounded=False,
+        )
+
     if not hits:
         return ChatAnswer(
             answer=settings.insufficient_evidence_message,
@@ -155,7 +195,6 @@ def generate_grounded_answer(
         )
 
     citations = _build_citations(hits, max_items=5)
-    response_language = _determine_response_language(question)
     answer = _compose_generative_answer(
         question=question,
         hits=hits,

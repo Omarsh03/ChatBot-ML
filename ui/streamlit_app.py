@@ -1,3 +1,5 @@
+import re
+
 import requests
 import streamlit as st
 
@@ -11,9 +13,19 @@ course_id = st.sidebar.text_input("Course ID", value="machine_learning")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+
+def _normalize_math_markdown(text: str) -> str:
+    """
+    Make model equations render reliably in Streamlit markdown.
+    Converts LaTeX delimiters \\(...\\) and \\[...\\] into $...$ / $$...$$.
+    """
+    normalized = re.sub(r"\\\[(.+?)\\\]", r"$$\1$$", text, flags=re.DOTALL)
+    normalized = re.sub(r"\\\((.+?)\\\)", r"$\1$", normalized, flags=re.DOTALL)
+    return normalized
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        st.markdown(_normalize_math_markdown(message["content"]))
         if message["role"] == "assistant" and message.get("citations"):
             with st.expander("Sources"):
                 for citation in message["citations"]:
@@ -50,7 +62,7 @@ if prompt:
             st.success("Grounded answer from transcript evidence")
         else:
             st.warning("Insufficient evidence from transcripts")
-        st.markdown(answer)
+        st.markdown(_normalize_math_markdown(answer))
         if citations:
             with st.expander("Sources"):
                 for citation in citations:
