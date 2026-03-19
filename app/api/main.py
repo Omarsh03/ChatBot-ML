@@ -45,6 +45,7 @@ def chat(payload: ChatRequest) -> ChatAnswer:
         return run_retrieve_and_answer(
             question=payload.question,
             course_id=payload.course_id,
+            chat_history=payload.chat_history,
             settings=settings,
         )
     except Exception as exc:  # pragma: no cover

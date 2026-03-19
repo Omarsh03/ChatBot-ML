@@ -2,7 +2,8 @@ import logging
 import re
 
 from app.core.config import Settings
-from app.domain.models import ChatAnswer, Citation, DocumentChunk
+from app.domain.models import ChatAnswer, ChatTurn, Citation, DocumentChunk
+from app.services.conversation_context import is_brief_requested
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ def _compose_generative_answer(
     hits: list[tuple[DocumentChunk, float]],
     settings: Settings,
     response_language: str,
+    chat_history: list[ChatTurn],
 ) -> str | None:
     if not settings.use_llm_grounded_answers:
         return None
@@ -141,16 +143,23 @@ def _compose_generative_answer(
     if not context.strip():
         return None
 
+    recent_history = chat_history[-6:]
+    history_block = "\n".join(f"{turn.role}: {turn.content}" for turn in recent_history if turn.content.strip())
+    brevity_instruction = (
+        "Keep the answer very concise (3-5 lines max)." if is_brief_requested(question) else "Keep the answer concise."
+    )
+
     system_prompt = (
         "You are a strict course assistant.\n"
         "Answer using only the transcript evidence provided.\n"
         "If evidence is weak or ambiguous, say so briefly.\n"
-        "Prefer concise, direct answers.\n"
+        f"{brevity_instruction}\n"
         "Do not invent facts outside the evidence.\n"
         "When writing math, format equations in LaTeX markdown using $...$ for inline and $$...$$ for blocks."
     )
     user_prompt = (
         f"Question:\n{question}\n\n"
+        f"Recent conversation:\n{history_block or '[none]'}\n\n"
         f"Transcript evidence:\n{context}\n\n"
         f"Write a grounded answer in {'Hebrew' if response_language == 'he' else 'English'}."
     )
@@ -177,7 +186,9 @@ def generate_grounded_answer(
     question: str,
     hits: list[tuple[DocumentChunk, float]],
     settings: Settings,
+    chat_history: list[ChatTurn] | None = None,
 ) -> ChatAnswer:
+    history = chat_history or []
     response_language = _determine_response_language(question)
 
     if _is_greeting_or_smalltalk(question):
@@ -200,6 +211,7 @@ def generate_grounded_answer(
         hits=hits,
         settings=settings,
         response_language=response_language,
+        chat_history=history,
     )
     if not answer:
         answer = _compose_extractive_answer(question, hits, response_language=response_language)

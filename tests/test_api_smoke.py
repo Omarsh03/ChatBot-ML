@@ -36,7 +36,7 @@ def test_api_health_ingest_chat_smoke(tmp_path: Path) -> None:
 
         chat_res = client.post(
             "/chat",
-            json={"question": "What is supervised learning?", "course_id": "machine_learning"},
+            json={"question": "What is supervised learning?"},
         )
         assert chat_res.status_code == 200
         chat_payload = chat_res.json()
@@ -48,7 +48,7 @@ def test_api_health_ingest_chat_smoke(tmp_path: Path) -> None:
         api_main.settings.min_retrieval_score = 1.1
         insufficient_res = client.post(
             "/chat",
-            json={"question": "Any answer?", "course_id": "machine_learning"},
+            json={"question": "Any answer?"},
         )
         assert insufficient_res.status_code == 200
         insufficient_payload = insufficient_res.json()

@@ -35,9 +35,21 @@ class Citation(BaseModel):
     score: Optional[float] = None
 
 
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
-    course_id: str = "machine_learning"
+    course_id: Optional[str] = Field(
+        default=None,
+        description="Optional explicit course ID. If omitted, the backend auto-routes by question.",
+    )
+    chat_history: list[ChatTurn] = Field(
+        default_factory=list,
+        description="Optional previous turns for contextual follow-up handling.",
+    )
 
 
 class IngestRequest(BaseModel):
