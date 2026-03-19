@@ -20,6 +20,8 @@ if "cancel_requested" not in st.session_state:
     st.session_state.cancel_requested = False
 if "future" not in st.session_state:
     st.session_state.future = None
+if "queued_prompt" not in st.session_state:
+    st.session_state.queued_prompt = None
 
 
 def _normalize_math_markdown(text: str) -> str:
@@ -73,7 +75,8 @@ prompt = st.chat_input("Ask a question about the course material")
 
 if prompt:
     if st.session_state.is_processing:
-        st.info("Please wait for the current response to finish, or click Stop.")
+        st.session_state.queued_prompt = prompt
+        st.rerun()
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.pending_prompt = prompt
@@ -132,3 +135,34 @@ if st.session_state.is_processing and st.session_state.future is not None:
         st.session_state.pending_prompt = None
         st.session_state.future = None
         st.rerun()
+
+if not st.session_state.is_processing and st.session_state.queued_prompt:
+    st.info(f"Queued message: {st.session_state.queued_prompt}")
+    col_send, col_discard, _ = st.columns([1, 1, 4])
+    with col_send:
+        if st.button("Send", type="primary"):
+            queued = st.session_state.queued_prompt
+            st.session_state.queued_prompt = None
+            st.session_state.messages.append({"role": "user", "content": queued})
+            st.session_state.pending_prompt = queued
+            st.session_state.is_processing = True
+            st.session_state.cancel_requested = False
+
+            history_payload = [
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.messages[:-1]
+                if m.get("role") in {"user", "assistant"} and m.get("content")
+            ]
+
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(
+                _call_api,
+                f"{api_base_url}/chat",
+                {"question": queued, "chat_history": history_payload},
+            )
+            st.session_state.future = future
+            st.rerun()
+    with col_discard:
+        if st.button("Discard"):
+            st.session_state.queued_prompt = None
+            st.rerun()
