@@ -19,3 +19,18 @@ def test_explicit_hebrew_override_beats_dominant_english() -> None:
 def test_english_question_defaults_to_english() -> None:
     question = "Can you explain reinforcement learning in simple terms?"
     assert _determine_response_language(question) == "en"
+
+
+def test_hebrew_phrase_explain_in_english_overrides_to_english() -> None:
+    question = "מה זה הפרדה לינארית? תסביר באנגלית"
+    assert _determine_response_language(question) == "en"
+
+
+def test_hebrew_phrase_explain_in_hebrew_overrides_to_hebrew() -> None:
+    question = "What is linear separation? תסביר בעברית"
+    assert _determine_response_language(question) == "he"
+
+
+def test_last_language_indicator_wins_when_both_present() -> None:
+    question = "Explain shortly in english, ואז תענה בעברית"
+    assert _determine_response_language(question) == "he"

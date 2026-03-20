@@ -21,10 +21,10 @@ This repository currently includes **Milestone 1 to Transcription T6**:
 - retrieval from FAISS index
 - grounded answer generation with citations
 - explicit insufficient-evidence fallback response
-- minimal FastAPI endpoints (`/health`, `/ingest`, `/chat`)
+- FastAPI endpoints (`/health`, `/ingest`, `/chat`, `/chat_image`)
 - transcription integration pipeline using `WhisperHe.transcribe(path)`
 - minimal transcription trigger endpoint (`/transcribe`)
-- minimal Streamlit chat UI wired to `/chat`
+- Streamlit chat UI with optional image upload (text-only flow unchanged)
 - Milestone smoke tests for ingestion, indexing, retrieval/answering, and API
 
 This MVP now supports end-to-end local demo flow.
@@ -78,7 +78,7 @@ Without a provider API key, the app can still run using local-hash fallback retr
 - Transcribe (and ingest/index):
   - `Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/transcribe" -ContentType "application/json" -Body '{"course_id":"machine_learning","run_ingestion":true}'`
 - Chat:
-  - `Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/chat" -ContentType "application/json" -Body '{"question":"What is supervised learning?","course_id":"machine_learning"}'`
+  - `Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/chat" -ContentType "application/json" -Body '{"question":"What is supervised learning?"}'`
 
 ## Retrieval quality mode (recommended)
 
@@ -89,6 +89,7 @@ To improve answer quality, switch from local hash embeddings to OpenAI embedding
   - `EMBEDDING_PROVIDER=openai`
   - `OPENAI_API_KEY=<your_key>`
   - `OPENAI_EMBEDDING_MODEL=text-embedding-3-large`
+  - `OPENAI_VISION_MODEL=gpt-4o-mini` (used when a user uploads an image)
   - `RERANK_PROVIDER=cohere`
   - `COHERE_API_KEY=<your_key>`
   - `COHERE_RERANK_MODEL=rerank-multilingual-v3.0`

@@ -50,6 +50,10 @@ class ChatRequest(BaseModel):
         default_factory=list,
         description="Optional previous turns for contextual follow-up handling.",
     )
+    image_context: str = Field(
+        default="",
+        description="Optional carried image context for follow-up turns in the same chat session.",
+    )
 
 
 class IngestRequest(BaseModel):
@@ -65,3 +69,4 @@ class ChatAnswer(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
     grounded: bool = True
+    image_context: str = Field(default="", description="Image context used for this answer, if any.")

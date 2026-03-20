@@ -1,4 +1,6 @@
 import re
+import json
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, Future
 
 import requests
@@ -22,6 +24,14 @@ if "future" not in st.session_state:
     st.session_state.future = None
 if "queued_prompt" not in st.session_state:
     st.session_state.queued_prompt = None
+if "queued_image" not in st.session_state:
+    st.session_state.queued_image = None
+if "last_image_context" not in st.session_state:
+    st.session_state.last_image_context = ""
+if "image_armed" not in st.session_state:
+    st.session_state.image_armed = False
+if "last_uploaded_image_sig" not in st.session_state:
+    st.session_state.last_uploaded_image_sig = ""
 
 
 def _normalize_math_markdown(text: str) -> str:
@@ -30,10 +40,55 @@ def _normalize_math_markdown(text: str) -> str:
     return normalized
 
 
-def _call_api(url: str, payload: dict) -> dict:
-    response = requests.post(url, json=payload, timeout=60)
+def _call_api(url: str, payload: dict, image_attachment: dict | None = None) -> dict:
+    if image_attachment:
+        response = requests.post(
+            f"{url}/chat_image",
+            data={
+                "question": payload["question"],
+                "chat_history_json": json.dumps(payload.get("chat_history", []), ensure_ascii=False),
+            },
+            files={
+                "image": (
+                    image_attachment["name"],
+                    image_attachment["bytes"],
+                    image_attachment["mime_type"],
+                )
+            },
+            timeout=60,
+        )
+    else:
+        response = requests.post(
+            f"{url}/chat",
+            json={
+                "question": payload["question"],
+                "chat_history": payload.get("chat_history", []),
+                "image_context": payload.get("image_context", ""),
+            },
+            timeout=60,
+        )
     response.raise_for_status()
     return response.json()
+
+
+def _uploaded_image_payload(uploaded_file) -> dict | None:
+    if uploaded_file is None:
+        return None
+    content = uploaded_file.getvalue()
+    if not content:
+        return None
+    return {
+        "name": uploaded_file.name,
+        "bytes": content,
+        "mime_type": uploaded_file.type or "application/octet-stream",
+    }
+
+
+def _image_signature(image_payload: dict | None) -> str:
+    if not image_payload:
+        return ""
+    digest = hashlib.sha1(image_payload["bytes"]).hexdigest()[:16]
+    return f"{image_payload['name']}:{len(image_payload['bytes'])}:{digest}"
 
 
 for message in st.session_state.messages:
@@ -66,16 +121,39 @@ if st.session_state.is_processing:
             st.session_state.is_processing = False
             st.session_state.pending_prompt = None
             st.session_state.future = None
+            st.session_state.queued_image = None
             st.session_state.messages.append(
                 {"role": "assistant", "content": "Generation stopped by user.", "citations": [], "grounded": False}
             )
             st.rerun()
 
+uploaded_image = st.file_uploader(
+    "Optional image (diagram, screenshot, handwritten formula)",
+    type=["png", "jpg", "jpeg", "webp"],
+    accept_multiple_files=False,
+)
+current_image_payload = _uploaded_image_payload(uploaded_image)
+current_image_sig = _image_signature(current_image_payload)
+if current_image_sig and current_image_sig != st.session_state.last_uploaded_image_sig:
+    st.session_state.last_uploaded_image_sig = current_image_sig
+    st.session_state.image_armed = True
+elif not current_image_sig:
+    st.session_state.last_uploaded_image_sig = ""
+    st.session_state.image_armed = False
+
+if current_image_payload and st.session_state.image_armed:
+    st.caption("Image will be attached to the next message only.")
+elif current_image_payload:
+    st.caption("Image is not attached now. Re-upload image to attach it again.")
+
 prompt = st.chat_input("Ask a question about the course material")
 
 if prompt:
+    image_for_request = current_image_payload if st.session_state.image_armed else None
+    st.session_state.image_armed = False
     if st.session_state.is_processing:
         st.session_state.queued_prompt = prompt
+        st.session_state.queued_image = image_for_request
         st.rerun()
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -92,8 +170,9 @@ if prompt:
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(
             _call_api,
-            f"{api_base_url}/chat",
-            {"question": prompt, "chat_history": history_payload},
+            api_base_url,
+            {"question": prompt, "chat_history": history_payload, "image_context": st.session_state.last_image_context},
+            image_for_request,
         )
         st.session_state.future = future
         st.rerun()
@@ -112,6 +191,7 @@ if st.session_state.is_processing and st.session_state.future is not None:
         st.session_state.is_processing = False
         st.session_state.pending_prompt = None
         st.session_state.future = None
+        st.session_state.queued_image = None
         st.rerun()
 
     try:
@@ -128,6 +208,7 @@ if st.session_state.is_processing and st.session_state.future is not None:
         answer = payload.get("answer", "")
         citations = payload.get("citations", [])
         grounded = bool(payload.get("grounded", False))
+        st.session_state.last_image_context = (payload.get("image_context", "") or "").strip()
         st.session_state.messages.append(
             {"role": "assistant", "content": answer, "citations": citations, "grounded": grounded}
         )
@@ -137,7 +218,8 @@ if st.session_state.is_processing and st.session_state.future is not None:
         st.rerun()
 
 if not st.session_state.is_processing and st.session_state.queued_prompt:
-    st.info(f"Queued message: {st.session_state.queued_prompt}")
+    queued_note = " with image attachment" if st.session_state.queued_image else ""
+    st.info(f"Queued message{queued_note}: {st.session_state.queued_prompt}")
     col_send, col_discard, _ = st.columns([1, 1, 4])
     with col_send:
         if st.button("Send", type="primary"):
@@ -157,12 +239,15 @@ if not st.session_state.is_processing and st.session_state.queued_prompt:
             executor = ThreadPoolExecutor(max_workers=1)
             future = executor.submit(
                 _call_api,
-                f"{api_base_url}/chat",
-                {"question": queued, "chat_history": history_payload},
+                api_base_url,
+                {"question": queued, "chat_history": history_payload, "image_context": st.session_state.last_image_context},
+                st.session_state.queued_image,
             )
             st.session_state.future = future
+            st.session_state.queued_image = None
             st.rerun()
     with col_discard:
         if st.button("Discard"):
             st.session_state.queued_prompt = None
+            st.session_state.queued_image = None
             st.rerun()

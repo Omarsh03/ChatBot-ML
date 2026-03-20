@@ -94,3 +94,113 @@ def test_transcribe_endpoint_calls_pipeline(monkeypatch: pytest.MonkeyPatch) -> 
     response = client.post("/transcribe", json={"course_id": "machine_learning", "run_ingestion": True})
     assert response.status_code == 200
     assert response.json() == {"media_files": 2, "transcribed": 2, "indexed": 10}
+
+
+def test_chat_image_endpoint_uses_image_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_build_image_context_for_question(question, image_bytes, mime_type, settings):
+        _ = image_bytes
+        _ = mime_type
+        _ = settings
+        assert question == "What does this formula mean?"
+        return "Extracted formula: P(A|B)=P(B|A)P(A)/P(B)"
+
+    def _fake_run_retrieve_and_answer(
+        question,
+        settings,
+        course_id=None,
+        chat_history=None,
+        retrieval_question=None,
+        additional_context="",
+        image_bytes=b"",
+        image_mime_type="image/png",
+    ):
+        _ = settings
+        _ = course_id
+        _ = chat_history
+        _ = image_mime_type
+        assert question == "What does this formula mean?"
+        assert retrieval_question is not None
+        assert "Extracted formula" in retrieval_question
+        assert "Extracted formula" in additional_context
+        assert image_bytes == b"fake-image-bytes"
+        return {"answer": "ok", "citations": [], "grounded": True}
+
+    monkeypatch.setattr(api_main, "build_image_context_for_question", _fake_build_image_context_for_question)
+    monkeypatch.setattr(api_main, "run_retrieve_and_answer", _fake_run_retrieve_and_answer)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/chat_image",
+        data={"question": "What does this formula mean?", "chat_history_json": "[]"},
+        files={"image": ("formula.png", b"fake-image-bytes", "image/png")},
+    )
+    assert response.status_code == 200
+    assert response.json()["answer"] == "ok"
+
+
+def test_chat_image_returns_clear_failure_when_vision_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_build_image_context_for_question(question, image_bytes, mime_type, settings):
+        _ = question
+        _ = image_bytes
+        _ = mime_type
+        _ = settings
+        return ""
+
+    def _fake_run_retrieve_and_answer(*args, **kwargs):
+        raise AssertionError("retrieve_and_answer should not run for image-centric question without image context")
+
+    monkeypatch.setattr(api_main, "build_image_context_for_question", _fake_build_image_context_for_question)
+    monkeypatch.setattr(api_main, "run_retrieve_and_answer", _fake_run_retrieve_and_answer)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/chat_image",
+        data={"question": "תסביר לי את מה שיש בתמונה", "chat_history_json": "[]"},
+        files={"image": ("formula.png", b"fake-image-bytes", "image/png")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["grounded"] is False
+    assert payload["citations"] == []
+    assert "לא הצלחתי לקרוא את התמונה" in payload["answer"]
+
+
+def test_chat_endpoint_passes_image_context_for_followup(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_run_retrieve_and_answer(
+        question,
+        settings,
+        course_id=None,
+        chat_history=None,
+        additional_context="",
+        image_bytes=b"",
+        image_mime_type="image/png",
+    ):
+        _ = settings
+        _ = course_id
+        _ = chat_history
+        _ = image_bytes
+        _ = image_mime_type
+        assert question == "תסביר בעברית"
+        assert "Probability formulas" in additional_context
+        return {
+            "answer": "ok",
+            "citations": [],
+            "grounded": True,
+            "image_context": additional_context,
+        }
+
+    monkeypatch.setattr(api_main, "run_retrieve_and_answer", _fake_run_retrieve_and_answer)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "question": "תסביר בעברית",
+            "chat_history": [{"role": "user", "content": "תסביר את מה שיש בתמונה"}],
+            "image_context": "Summary of Probability formulas from uploaded image.",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "ok"
+    assert "Probability formulas" in payload["image_context"]
