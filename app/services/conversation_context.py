@@ -29,6 +29,49 @@ _EXAMPLE_FOLLOWUP_KEYWORDS = (
     "one more example",
 )
 _TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+_DIRECTIVE_TOKENS = {
+    "short",
+    "shorter",
+    "brief",
+    "briefly",
+    "summary",
+    "summarize",
+    "answer",
+    "reply",
+    "respond",
+    "write",
+    "explain",
+    "translate",
+    "in",
+    "english",
+    "hebrew",
+    "קצר",
+    "בקצרה",
+    "תמצית",
+    "תסכם",
+    "תן",
+    "תני",
+    "תענה",
+    "עני",
+    "תסביר",
+    "תסבירי",
+    "כתוב",
+    "כתבי",
+    "תרגם",
+    "תתרגם",
+    "באנגלית",
+    "בעברית",
+    "בבקשה",
+}
+
+
+def _tokenize(text: str) -> list[str]:
+    return [token.lower() for token in _TOKEN_PATTERN.findall(text)]
+
+
+def _has_subject_terms(tokens: list[str]) -> bool:
+    subject_tokens = [t for t in tokens if len(t) > 1 and t not in _DIRECTIVE_TOKENS]
+    return len(subject_tokens) >= 2
 
 
 def _last_user_question(chat_history: list[ChatTurn]) -> str | None:
@@ -43,17 +86,22 @@ def is_contextual_followup(question: str) -> bool:
     if not text:
         return False
 
-    keyword_groups = (
-        _SHORT_FOLLOWUP_KEYWORDS,
-        _TRANSLATION_OR_LANGUAGE_KEYWORDS,
-        _EXAMPLE_FOLLOWUP_KEYWORDS,
-    )
-    if any(keyword in text for group in keyword_groups for keyword in group):
+    tokens = _tokenize(text)
+    has_subject = _has_subject_terms(tokens)
+    has_short_directive = any(keyword in text for keyword in _SHORT_FOLLOWUP_KEYWORDS)
+    has_language_directive = any(keyword in text for keyword in _TRANSLATION_OR_LANGUAGE_KEYWORDS)
+
+    # "another example" style prompts are almost always follow-ups.
+    if any(keyword in text for keyword in _EXAMPLE_FOLLOWUP_KEYWORDS):
+        return True
+    if has_short_directive and not has_subject:
+        return True
+    if has_language_directive and not has_subject:
         return True
 
     # Very short prompts are often follow-ups ("short", "why?", "in english", etc.)
-    token_count = len(_TOKEN_PATTERN.findall(text))
-    return token_count <= 3
+    token_count = len(tokens)
+    return token_count <= 3 and not has_subject
 
 
 def build_retrieval_question(question: str, chat_history: list[ChatTurn]) -> str:

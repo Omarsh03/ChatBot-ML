@@ -5,6 +5,8 @@ from app.services.embedding_factory import build_embedding_provider
 import re
 
 _TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+_HE_PATTERN = re.compile(r"[\u0590-\u05FF]")
+_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 _STOPWORDS = {
     "the",
     "and",
@@ -83,6 +85,10 @@ def _course_retrieval_params(
     )
 
 
+def _is_mixed_language_query(text: str) -> bool:
+    return bool(_HE_PATTERN.search(text) and _LATIN_PATTERN.search(text))
+
+
 def retrieve_chunks(
     question: str,
     settings: Settings,
@@ -111,6 +117,13 @@ def retrieve_chunks(
         filtered_hits.append((chunk, boosted_score))
 
     filtered_hits.sort(key=lambda pair: pair[1], reverse=True)
+    if not filtered_hits and _is_mixed_language_query(question):
+        # Fallback: keep strong semantic hits when lexical match is too strict
+        # (common in mixed-language prompts like Hebrew question + English term).
+        semantic_threshold = min(0.55, max(min_retrieval_score + 0.12, 0.35))
+        semantic_hits = [(chunk, score) for chunk, score in hits if score >= semantic_threshold]
+        semantic_hits.sort(key=lambda pair: pair[1], reverse=True)
+        filtered_hits = semantic_hits[: max(settings.top_k, min_evidence_hits)]
 
     reranked_hits = _rerank_hits(
         question=question,

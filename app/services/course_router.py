@@ -10,6 +10,12 @@ _QUESTION_HINTS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"\bmachine learning\b", re.IGNORECASE),
         re.compile(r"\bml\b", re.IGNORECASE),
         re.compile(r"למידת\s+מכונה"),
+        re.compile(r"למידה\s+מונחית"),
+        re.compile(r"הפרדה\s+לינארית"),
+        re.compile(r"\bsupervised learning\b", re.IGNORECASE),
+        re.compile(r"\blinear separab(?:ility|le)\b", re.IGNORECASE),
+        re.compile(r"\blogistic regression\b", re.IGNORECASE),
+        re.compile(r"\bclassification\b", re.IGNORECASE),
     ),
     "probability": (
         re.compile(r"\bprobability\b", re.IGNORECASE),

@@ -13,6 +13,10 @@ def test_short_followup_is_detected() -> None:
 
 def test_non_followup_question_not_detected() -> None:
     assert not is_contextual_followup("Explain logistic regression with an example")
+    assert not is_contextual_followup("תן הסבר קצר על הפרדה לינארית")
+    assert not is_contextual_followup("explain supervised learning briefly")
+    assert not is_contextual_followup("מה זה למידה מונחית")
+    assert not is_contextual_followup("מה המשמעות של linear separability")
 
 
 def test_retrieval_question_expands_from_history_for_followup() -> None:
@@ -29,3 +33,8 @@ def test_brief_requested_detection() -> None:
     assert is_brief_requested("בקצרה בבקשה")
     assert is_brief_requested("Give a short answer")
     assert not is_brief_requested("Explain with details")
+
+
+def test_followup_language_instruction_without_topic_is_detected() -> None:
+    assert is_contextual_followup("תסביר באנגלית")
+    assert is_contextual_followup("answer in english")
